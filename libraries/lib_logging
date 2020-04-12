@@ -1,0 +1,191 @@
+# Logging library
+#
+# Version: @packageversion@
+# Date:    @packagedate@
+# 
+# This library intend to help logging in shell scripts. The levels proposed are:
+# DEBUG / INFO / WARNING / ERROR.
+# In order to use them the following functions are provided : LOG_{level}. If it
+# is required to log without level indication, just use the function LOG.
+#
+# For enabling a minimal level in the script that uses this library, just call
+# the function setLogLevel and give one of the level above as argument. If no
+# level is specified, by default INFO level is used.
+#
+# Another function helps to output logs into a file, instead of reading on the
+# console. This method is setLogFile. It waits for a filename as argument.
+#
+# The last method is to set verbose mode. This function only need to be called
+# without any argument. Then it will echo all logs in console and in output file
+# if defined.
+#
+# The pattern used is the following : {date}|{script}:{line}|{function}|{level}|{text}
+#     - date:       date and time of the log (dd/mm/yyyy hh:mm:ss)
+#     - script:     name of the script writing the log
+#     - line:       line of the script where the log function is called
+#     - function:   name of the function from which the log is written
+#     - level:      level of the log
+#     - text:       text of the log
+
+# Check if library is already loaded
+if env | grep -q "${BASH_SOURCE[0]##*/}_loaded"; then
+    LOG_INFO "Library ${BASH_SOURCE[0]##*/} already loaded"
+    return 0
+fi
+
+# Default log level to INFO
+__prop_csleLogLevel=2
+__prop_fileLogLevel=2
+# Default verbosity enable
+__prop_logVerbose=true
+# Default output log file
+__prop_logOutput=/dev/null
+# Die boolean
+__prop_die_enable=true
+
+# Function for printing properties
+function getLogProperties {
+    [[ "${__prop_fileLogLevel}" -eq "3" ]] && echo "Console log level: DEBUG"
+    [[ "${__prop_fileLogLevel}" -eq "2" ]] && echo "Console log level: INFO"
+    [[ "${__prop_fileLogLevel}" -eq "1" ]] && echo "Console log level: WARNING"
+    [[ "${__prop_fileLogLevel}" -eq "0" ]] && echo "Console log level: ERROR"
+    echo "Log verbose: ${__prop_logVerbose}"
+    echo "File log level: ${__prop_fileLogLevel}"
+    echo "Output log file: ${__prop_logOutput}"
+    echo "Die enable: ${__prop_die_enable}"
+}
+
+# Function for writing log in output file
+function __fct_echoFile {
+    if [[ "${__prop_logOutput}" != '/dev/null' ]]; then
+        echo "${@}" >> "${__prop_logOutput}";
+    fi
+}
+
+# Function for printing log on console
+function __fct_echoCsle {
+    if [[ ${__prop_logVerbose} ]]; then
+        echo "${@}";
+    fi
+}
+
+# Main log function
+function LOG {
+    local __prop_datePattern="$(date +"%d/%m/%Y %H:%M:%S")"
+    if [[ "${1}" == '-l' ]]; then
+        shift
+        if [[ "${1}" == "DEBUG" ]]; then
+            shift
+            [[ "${__prop_fileLogLevel}" -eq "3" ]] && __fct_echoFile "${__prop_datePattern}|DEBUG  |${@}"
+            [[ "${__prop_csleLogLevel}" -eq "3" ]] && __fct_echoCsle "${__prop_datePattern}|DEBUG  |${@}"
+        elif [[ "${1}" == "INFO" ]]; then
+            shift
+            [[ "${__prop_fileLogLevel}" -ge "2" ]] && __fct_echoFile "${__prop_datePattern}|INFO   |${@}"
+            [[ "${__prop_csleLogLevel}" -ge "2" ]] && __fct_echoCsle "${__prop_datePattern}|INFO   |${@}"
+        elif [[ "${1}" == "WARNING" ]]; then
+            shift
+            [[ "${__prop_fileLogLevel}" -ge "1" ]] && __fct_echoFile "${__prop_datePattern}|WARNING|${@}"
+            [[ "${__prop_csleLogLevel}" -ge "1" ]] && __fct_echoCsle "${__prop_datePattern}|WARNING|${@}"
+        elif [[ "${1}" == "ERROR" ]]; then
+            shift
+            [[ "${__prop_fileLogLevel}" -ge "0" ]] && __fct_echoFile "${__prop_datePattern}|ERROR  |${@}"
+            [[ "${__prop_csleLogLevel}" -ge "0" ]] && __fct_echoCsle "${__prop_datePattern}|ERROR  |${@}"
+        elif [[ "${__prop_fileLogLevel}" -eq "-1" ]]; then
+            # Nothing to do, logs are disabled
+            return 0
+        else
+            echo "Error while logging: Unknown log level ${1}"
+        fi
+    else
+        __fct_echoFile "${__prop_datePattern}|${@}"
+        __fct_echoCsle "${__prop_datePattern}|${@}"
+    fi
+}
+
+# Alias for debug log
+function LOG_DEBUG {
+    LOG -l "DEBUG" "${0##*/}:${BASH_LINENO[1]}|${FUNCNAME[1]}|${@}"
+}
+
+# Alias for info log
+function LOG_INFO {
+    LOG -l "INFO" "${0##*/}:${BASH_LINENO[1]}|${FUNCNAME[1]}|${@}"
+}
+
+# Alias for warning log
+function LOG_WARNING {
+    LOG -l "WARNING" "${0##*/}:${BASH_LINENO[1]}|${FUNCNAME[1]}|${@}"
+}
+
+# Alias for error log
+function LOG_ERROR {
+    LOG -l "ERROR" "${0##*/}:${BASH_LINENO[1]}|${FUNCNAME[1]}|${@}"
+}
+
+function DIE {
+    LOG_ERROR "${@}"
+    if [[ "${__prop_die_enable}" == "true" ]]; then
+        exit 1
+    fi
+}
+
+# Function for setting output log file
+function setLogFile {
+    __prop_logOutput="${1}"
+    LOG_DEBUG "Setting output log file to: ${1}"
+}
+
+# Function for enabling verbose mode
+function setVerboseOn {
+    __prop_logVerbose=true
+    LOG_DEBUG "Enabling verbose mode"
+}
+
+# Function for disabling verbose mode
+function setVerboseOff {
+    __prop_logVerbose=false
+    LOG_DEBUG "Disabling verbose mode"
+}
+
+function setDieOff {
+    __prop_die_enable=false
+    LOG_DEBUG "Disabling dying mode"
+}
+
+function setDieOn {
+    __prop_die_enable=true
+    LOG_DEBUG "Enabling dying mode"
+}
+
+# Function for setting console log level
+function setConsoleLogLevel {
+    case ${1} in
+        "DEBUG"    ) __prop_csleLogLevel=3  ;;
+        "INFO"     ) __prop_csleLogLevel=2  ;;
+        "WARNING"  ) __prop_csleLogLevel=1  ;;
+        "ERROR"    ) __prop_csleLogLevel=0  ;;
+        "NO_TRACE" ) __prop_csleLogLevel=-1 ;;
+        * )
+        echo "Error while setting console log level: Unknown log level ${1}"
+        return 1
+    esac
+    LOG_DEBUG "Changing console log level to: ${1}"
+}
+
+# Function for setting output file log level
+function setFileLogLevel {
+    case ${1} in
+        "DEBUG"    ) __prop_fileLogLevel=3  ;;
+        "INFO"     ) __prop_fileLogLevel=2  ;;
+        "WARNING"  ) __prop_fileLogLevel=1  ;;
+        "ERROR"    ) __prop_fileLogLevel=0  ;;
+        "NO_TRACE" ) __prop_fileLogLevel=-1 ;;
+        * )
+        echo "Error while setting output file log level: Unknown log level ${1}"
+        return 1
+    esac
+    LOG_DEBUG "Changing output file log level to: ${1}"
+}
+
+# Variable to prevent library to be reloaded
+export ${BASH_SOURCE[0]##*/}_loaded="$(date +"%Y%m%d_%H%M%S")"

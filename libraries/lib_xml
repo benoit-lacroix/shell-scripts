@@ -1,0 +1,214 @@
+# XML library
+#
+# Version: @packageversion@
+# Date:    @packagedate@
+#
+# This library intend to help writing XML files from shell scripts.
+
+# Check if library is already loaded
+if env | grep -q "${BASH_SOURCE[0]##*/}_loaded"; then
+    LOG_INFO "Library ${BASH_SOURCE[0]##*/} already loaded"
+    return 0
+fi
+
+# Loading logging library
+source lib_logging
+
+__prop_output_file=/dev/null
+__prop_append_output=false
+__prop_indent_level=0
+__prop_indent_char=
+__prop_indent_space_nb=4
+__prop_default_header='<?xml version="1.0"?>'
+__prop_header=
+__prop_console_debug=false
+
+# Enabling debug mode. All output will be printed in the console.
+function setDebugOn {
+    setConsoleLogLevel "DEBUG"
+    setVerboseOn
+    setDieOff
+    __prop_console_debug=true
+}
+
+# If true, datas will be appended to the output file if already exists.
+# If false, existing output file will be deleted and datas will be writed into a new one.
+function setAppendDatas {
+    case ${1} in
+        "true" )
+            __prop_append_output="true"
+            ;;
+        "false" )
+            __prop_append_output="false"
+            ;;
+        * )
+            DIE "Unknown append mode. Only true / false accepted."
+    esac
+    LOG_INFO "Changing appending mode to ${__prop_append_output}"
+}
+
+# Define output file to write datas
+function setOutputFile {
+    local tmp_out=${1}
+    if [[ "${tmp_out%/*}" != "${tmp_out}" && ! -d "${tmp_out%/*}" ]]; then
+        DIE "Output directory ${tmp_out%/*} doesn't exists."
+    else
+        __prop_output_file=${tmp_out}
+        LOG_INFO "Setting output file to ${__prop_output_file}"
+    fi
+
+    if [[ -f ${__prop_output_file} && ${__prop_append_output} == "false" ]]; then
+        LOG_INFO "Output file already exists. Overwriting it."
+        LOG_DEBUG "Removing old file"
+        rm -f ${__prop_output_file}
+        LOG_DEBUG "Creating new output file"
+        touch ${__prop_output_file}
+    elif [[ -f ${__prop_output_file} && ${__prop_append_output} == "true" ]]; then
+        LOG_INFO "Appending datas to existing file"
+    else
+        LOG_INFO "Creating output file"
+        touch ${__prop_output_file}
+    fi
+}
+
+# Define indentation length (only spaces, no tabular)
+function setIndentLength {
+    if [[ "${1}" -ge "0" ]]; then
+        __prop_indent_space_nb=${1}
+        LOG_INFO "Changing indentation length to: ${__prop_indent_space_nb}"
+    else
+        DIE "Invalid indentation length: ${1}"
+    fi
+}
+
+# Function called every time the indentation is changed.
+# For example when a tag is opened or closed.
+function __fct_change_indentation {
+    __prop_indent_level=$((${__prop_indent_level} + ${1}))
+    local tmp_char=""
+    for i in $(seq $((${__prop_indent_level} * ${__prop_indent_space_nb}))); do
+        tmp_char="${tmp_char} "
+    done
+    __prop_indent_char="${tmp_char}"
+    LOG_DEBUG "Changing indentation to level ${__prop_indent_level}"
+}
+
+# Function for writing to output file.
+# If debug mode is enabled, then no output file will be produced.
+# All output will be written in the console.
+function wOutput {
+    LOG_DEBUG "Writing to output file: '${__prop_indent_char}${1}'"
+    if [[ ! ${__prop_console_debug} ]]; then
+        echo "${__prop_indent_char}${1}" >> ${__prop_output_file}
+    else
+        echo "${__prop_indent_char}${1}"
+    fi
+}
+
+
+
+# ==== Functions for managing HEADER ====
+
+# Function for writing header to output file.
+function wHeader {
+    if [[ -z "${__prop_header}" ]]; then
+        wOutput "${__prop_default_header}"
+    else
+        wOutput "${__prop_header}"
+    fi
+}
+
+# Function for setting a new header to be written at the begining of the output file
+function setHeader {
+    if [[ ! -z "${@}" ]]; then
+        __prop_header=${1}
+        LOG_INFO "Changing header to: ${__prop_header}"
+    else
+        __prop_header=
+        LOG_ERROR "Header can not be null. Resetting to default header."
+        resetHeader
+    fi
+}
+
+# Function for adding a new item to the header
+function addHeader {
+    if [[ -z ${__prop_header} ]]; then
+        __prop_header=${__prop_default_header}
+    fi
+    __prop_header=$(cat << EOHEADER
+${__prop_header}
+${@}
+EOHEADER
+)
+    LOG_INFO "Adding to header: ${@}"
+}
+
+# Function for resetting the header to its default value
+function resetHeader {
+    __prop_header=
+    LOG_DEBUG "Resetting default header: ${__prop_default_header}"
+}
+
+
+
+# ==== Functions for managing TAGS ====
+
+# ==================== TODO: Add attribute decomposition to wStartTag and wLonelyTag functions ====================
+
+# Function that help to write full tag (opening tag, closing tag and content)
+function wFullTag {
+    # tag -att=value -att=value -att ... content
+    local tag=${1}
+    local attribute
+    local content
+    shift
+    for i in $(seq ${#}); do
+        if [[ "$(echo ${1} | cut -c1)" == "-" ]]; then
+            if [[ "${1#*=}" != "${1}" ]]; then
+                tmp_attribute="$(echo ${1} | cut -c2-)"
+                attribute="${attribute} ${tmp_attribute}"
+            else
+                tmp_attribute="$(echo ${1%=*} | cut -c2-)"
+                tmp_val="${1#*=}"
+                attribute="${attribute} ${tmp_attribute}=\"${tmp_val}\""
+            fi
+            shift
+        else
+            content="${@}"
+            break
+        fi
+    done
+    wOutput "<${tag}${attribute}>${content}</${tag}>"
+}
+
+# Function for writing only an opening tag
+function wStartTag {
+    local output="<${1}"
+    shift
+    for i in $(seq $#); do
+        output="${output} ${1}"
+        shift
+    done
+    wOutput "${output}>"
+    __fct_change_indentation +1
+}
+
+# Function for writing only a closing tag
+function wEndTag {
+    __fct_change_indentation -1
+    wOutput "</${1}>"
+}
+
+# Function for writing a lonely tag
+function wLonelyTag {
+    local output="<${1}"
+    shift
+    for i in $(seq $#); do
+        output="${output} ${1}"
+        shift
+    done
+    wOutput "${output}/>"
+}
+
+# Variable to prevent library to be reloaded
+export ${BASH_SOURCE[0]##*/}_loaded="$(date +"%Y%m%d_%H%M%S")"

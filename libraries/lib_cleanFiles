@@ -1,0 +1,72 @@
+# Clean Files library
+#
+# Version: @packageversion@
+# Date:    @packagedate@
+
+# Check if library is already loaded
+if env | grep -q "${BASH_SOURCE[0]##*/}_loaded"; then
+    LOG_INFO "Library ${BASH_SOURCE[0]##*/} already loaded"
+    return 0
+fi
+
+# Loading logging library
+source lib_logging
+
+# Retention value (in minutes)
+__prop_retention=-1
+
+# Function for setting retention value
+# setRetention {value} {unit}
+function setRetention {
+    local tmp_value=${1}
+    local tmp_unit=${2}
+
+    if [[ ${tmp_value} -lt 0 ]]; then
+        LOG_ERROR "Retention must be a number greater than 0"
+        return 1
+    fi
+
+    case "${tmp_unit}" in
+        "W" ) __prop_retention=$((${tmp_value}*7*24*60)) ;;
+        "D" ) __prop_retention=$((${tmp_value}*24*60)) ;;
+        "H" ) __prop_retention=$((${tmp_value}*60)) ;;
+        "M" ) __prop_retention=${tmp_value} ;;
+        * )
+            LOG_ERROR "Invalid retention unit ${tmp_unit} (available: W / D / H / M)"
+            return 1
+            ;;
+    esac
+    LOG_DEBUG "Setting retention value to ${__prop_retention} minute(s)"
+}
+
+# Function for removing a file (does not work for directories)
+function __fct_removeFile {
+    local file=${1}
+    if [[ -e ${file} ]]; then
+        rm -f ${file}
+        LOG_INFO "File removed: ${file}"
+    else
+        LOG_ERROR "File does not exists: ${file}"
+        return 1
+    fi
+}
+
+# Function for searching and removing files that are older than the retention 
+function findAndRemove {
+    if [[ ${__prop_retention} -eq "-1" ]]; then
+        LOG_ERROR "Retention has not been setted"
+        return 1
+    fi
+
+    local base_dir=${1}
+    if [[ -e ${base_dir} ]]; then
+        LOG_INFO "Cleaning directory: ${base_dir}"
+        find . -mmin ${__prop_retention} -exec __fct_removeFile {}
+    else
+        LOG_ERROR "Unknown directory ${base_dir}"
+        return 1
+    fi
+}
+
+# Variable to prevent library to be reloaded
+export ${BASH_SOURCE[0]##*/}_loaded="$(date +"%Y%m%d_%H%M%S")"
